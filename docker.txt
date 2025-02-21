@@ -1,0 +1,3 @@
+get.docker.com
+dockerpull.pw
+lq-docker.asia
