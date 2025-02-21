@@ -5,7 +5,23 @@
 > 
 > 默认情况下取工作目录下的docker.txt文件进行检查，如果文件不存在则会从当前仓库拉取最新的数据
 
-### 命令说明：
+### 使用
+#### Linux下的一键执行命令:
+
+```bash
+curl -L https://github.com/YMingPro/docker-registry-checker/releases/latest/download/docker-registry-checker -o docker-registry-checker && chmod +x docker-registry-checker && ./docker-registry-checker
+```
+或者
+```bash
+wget https://github.com/YMingPro/docker-registry-checker/releases/latest/download/docker-registry-checker && chmod +x docker-registry-checker && ./docker-registry-checker
+```
+
+#### Windows下的一键执行命令:
+```cmd
+curl -L https://github.com/YMingPro/docker-registry-checker/releases/latest/download/docker-registry-checker.exe -o docker-registry-checker.exe && docker-registry-checker.exe
+```
+
+### 可选参数说明：
 - `-l` 参数来筛选只显示成功的结果
 - `-timeout` 指定请求超时时间（秒）
 - `-update` 强制从GitHub更新docker.txt
@@ -35,5 +51,9 @@ todo
 
 感谢Goland提供的支持
 
-感谢dockerproxy.xiaoxuan6.us.kg和http://status.kggzs.cn/status/docker提供的数据
+感谢以下网站提供的数据支持
+
+dockerproxy.xiaoxuan6.us.kg
+
+http://status.kggzs.cn/status/docker
 
