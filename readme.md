@@ -1,9 +1,14 @@
 
 # Docker Registry Checker
 
-> 一个检测Docker镜像源的工具
+> 一个检测Docker镜像源的脚本工具 (Windows / Linux)
 > 
 > 默认情况下取工作目录下的docker.txt文件进行检查，如果文件不存在则会从当前仓库拉取最新的数据
+
+### 功能
+-[x] 支持批量检测registry是否可用
+-[x] 支持Linux检测后批量替换或指定替换registry
+-[ ] Linux一键安装docker和docker-compose
 
 ### 使用
 #### Linux下的一键执行命令:
@@ -43,17 +48,3 @@ EOF
 
 systemctl daemon-reload && systemctl restart docker
 ```
-
-### 版本说明：
-```
-todo
-```
-
-感谢Goland提供的支持
-
-感谢以下网站提供的数据支持
-
-dockerproxy.xiaoxuan6.us.kg
-
-http://status.kggzs.cn/status/docker
-
