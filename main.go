@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
@@ -22,6 +24,154 @@ type CheckResult struct {
 	Time       time.Duration
 	StatusCode int
 	IsTimeout  bool
+}
+
+// Docker daemon.json 配置结构
+type DaemonConfig struct {
+	RegistryMirrors []string `json:"registry-mirrors,omitempty"`
+	// 其他配置项...
+}
+
+// 检查docker是否已安装
+func checkDockerInstalled() bool {
+	cmd := exec.Command("docker", "--version")
+	return cmd.Run() == nil
+}
+
+// 检查并读取daemon.json
+func readDaemonConfig() (*DaemonConfig, error) {
+	config := &DaemonConfig{}
+
+	configPath := "/etc/docker/daemon.json"
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		// 文件不存在，返回空配置
+		return config, nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取daemon.json失败: %v", err)
+	}
+
+	if len(data) == 0 {
+		return config, nil
+	}
+
+	if err := json.Unmarshal(data, config); err != nil {
+		return nil, fmt.Errorf("解析daemon.json失败: %v", err)
+	}
+
+	return config, nil
+}
+
+// 写入daemon.json
+func writeDaemonConfig(config *DaemonConfig) error {
+	data, err := json.MarshalIndent(config, "", "    ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %v", err)
+	}
+
+	if err := os.MkdirAll("/etc/docker", 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %v", err)
+	}
+
+	if err := os.WriteFile("/etc/docker/daemon.json", data, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %v", err)
+	}
+
+	return nil
+}
+
+// 执行系统命令
+func execCommand(command string) error {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Linux系统下的特殊处理
+func handleLinuxSystem(successResults []CheckResult) error {
+	// 检查docker是否安装
+	if !checkDockerInstalled() {
+		return fmt.Errorf("未检测到Docker，请先安装Docker")
+	}
+
+	// 读取当前配置
+	config, err := readDaemonConfig()
+	if err != nil {
+		return err
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("\n请选择操作：")
+	fmt.Println("1. 替换全部镜像源")
+	fmt.Println("2. 选择单个镜像源")
+	fmt.Print("请输入选项 (1/2): ")
+
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	var newMirrors []string
+
+	switch choice {
+	case "1":
+		// 替换全部镜像源
+		for _, result := range successResults {
+			newMirrors = append(newMirrors, "https://"+result.Host)
+		}
+	case "2":
+		// 显示可选项
+		fmt.Println("\n可用的镜像源：")
+		for i, result := range successResults {
+			fmt.Printf("%d. %s (响应时间: %.2fs)\n", i+1, result.Host, result.Time.Seconds())
+		}
+
+		fmt.Print("请选择镜像源编号: ")
+		var index int
+		fmt.Scanln(&index)
+
+		if index < 1 || index > len(successResults) {
+			return fmt.Errorf("无效的选择")
+		}
+
+		newMirrors = append(newMirrors, "https://"+successResults[index-1].Host)
+	default:
+		return fmt.Errorf("无效的选择")
+	}
+
+	// 更新配置
+	config.RegistryMirrors = newMirrors
+
+	// 写入新配置
+	if err := writeDaemonConfig(config); err != nil {
+		return err
+	}
+
+	fmt.Println("\n新的daemon.json配置：")
+	configData, _ := json.MarshalIndent(config, "", "    ")
+	fmt.Println(string(configData))
+
+	// 重载daemon
+	fmt.Println("\n正在重载Docker daemon...")
+	if err := execCommand("systemctl daemon-reload"); err != nil {
+		return fmt.Errorf("重载Docker daemon失败: %v", err)
+	}
+
+	// 询问是否重启docker
+	fmt.Print("\n是否重启Docker服务? (y/n): ")
+	restart, _ := reader.ReadString('\n')
+	restart = strings.TrimSpace(strings.ToLower(restart))
+
+	if restart == "y" || restart == "yes" {
+		fmt.Println("正在重启Docker服务...")
+		if err := execCommand("systemctl restart docker"); err != nil {
+			return fmt.Errorf("重启Docker服务失败: %v", err)
+		}
+		fmt.Println("Docker服务已重启")
+	}
+
+	return nil
 }
 
 // 从GitHub下载docker.txt
@@ -202,6 +352,7 @@ func main() {
 
 	// 显示进度并收集结果
 	fmt.Println() // 为进度条留出空行
+
 	for result := range results {
 		resultCount++
 		allResults = append(allResults, result)
@@ -261,6 +412,28 @@ func main() {
 			successCount++
 		}
 	}
+	var successResults []CheckResult
+	for _, result := range allResults {
+		if result.Available && !result.IsTimeout {
+			successResults = append(successResults, result)
+		}
+	}
+
 	fmt.Printf("\n检测完成! (成功: %d, 总计: %d)\n", successCount, totalCount)
+
+	// Linux系统特殊处理
+	if runtime.GOOS == "linux" {
+		fmt.Println("\n检测到Linux系统，是否进行镜像源配置？(y/n)")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+
+		if answer == "y" || answer == "yes" {
+			if err := handleLinuxSystem(successResults); err != nil {
+				fmt.Printf("配置失败: %v\n", err)
+			}
+		}
+	}
+
 	waitForKeyPress()
 }
